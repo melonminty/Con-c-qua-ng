@@ -2,12 +2,15 @@ import * as THREE from "three";
 import { GLTFLoader } from "three/examples/jsm/loaders/GLTFLoader.js";
 
 const sharkTemplates = [];
+const sharkAnimations = [];
 export const sharksData = []; 
 
 // Hàm khởi tạo và tải model Shark
 export function loadSharkModel(loader) {
     return new Promise((resolve) => {
         loader.load('/Shark.glb', (gltf) => {
+            sharkAnimations.splice(0, sharkAnimations.length, ...(gltf.animations || []));
+
             gltf.scene.traverse((child) => {
                 if (child.isMesh) {
                     sharkTemplates.push(child);
@@ -30,7 +33,7 @@ export function spawnSharks(scene, getPositionFromGrid, allAvailableRows, TILE_S
     // Lọc bỏ hàng xuất phát (-22), hàng trên cùng (22) và các hàng lân cận (-21, 21)
     const validRows = allAvailableRows.filter(row => row !== -22 && row !== 22 && row !== -21 && row !== 21);
     validRows.sort(() => Math.random() - 0.5);
-    const sharkRows = validRows.slice(0, 23); // Lấy 23 hàng cho cá mập
+    const sharkRows = validRows.slice(0, 22); // Lấy 23 hàng cho cá mập
 
     sharkRows.forEach(row => {
         const numSharks = Math.floor(Math.random() * 2) + 1; 
@@ -50,6 +53,14 @@ export function spawnSharks(scene, getPositionFromGrid, allAvailableRows, TILE_S
             // Nếu model nằm trong đối tượng cha, ta vẫn có thể scale và căn chỉnh trực tiếp nhóm lớn
             sharkGroup.scale.set(0.7, 0.7, 0.7);
             sharkGroup.rotation.y = 0;
+
+            let mixer = null;
+            if (sharkAnimations.length > 0) {
+                mixer = new THREE.AnimationMixer(sharkGroup);
+                sharkAnimations.forEach((clip) => {
+                    mixer.clipAction(clip).play();
+                });
+            }
 
             const hitboxSize = { width: 2.4, height: 1.2, depth: 1.2 }; 
             const hitboxGeometry = new THREE.BoxGeometry(hitboxSize.width, hitboxSize.height, hitboxSize.depth);
@@ -86,10 +97,13 @@ export function spawnSharks(scene, getPositionFromGrid, allAvailableRows, TILE_S
                 mesh: sharkGroup, // Gán mesh bằng group để đồng bộ
                 hitbox: hitboxMesh,
                 hitboxSize: hitboxSize,
+                mixer,
                 col: col,
                 row: row,
                 speed: 0.05 + Math.random() * 0.05,
                 direction: initialDirection,
+                elapsed: Math.random() * Math.PI * 2,
+                baseY: basePos.y,
                 minCol: MIN_COL - 2,
                 maxCol: MAX_COL + 2,
                 getPositionFromGrid
@@ -103,7 +117,18 @@ export function spawnSharks(scene, getPositionFromGrid, allAvailableRows, TILE_S
 
 export function updateSharks(delta) {
     sharksData.forEach(shark => {
+        shark.elapsed += delta;
+
+        if (shark.mixer) {
+            shark.mixer.timeScale = 0.85 + shark.speed * 3;
+            shark.mixer.update(delta);
+        }
+
         shark.group.position.x += shark.speed * shark.direction;
+
+        const swimBob = Math.max(0, Math.sin(shark.elapsed * 6)) * 0.05;
+        const swimRoll = Math.sin(shark.elapsed * 8) * 0.08 * shark.direction;
+        shark.group.position.y = shark.baseY + swimBob;
 
         // Xoay toàn bộ Group thay vì chỉ mesh con bên trong
         if (shark.direction === 1) {
@@ -111,6 +136,8 @@ export function updateSharks(delta) {
         } else {
             shark.group.rotation.y = -Math.PI / 2;
         }
+
+        shark.group.rotation.z = swimRoll;
 
         const currentX = shark.group.position.x;
         if (shark.direction === 1 && currentX > shark.maxCol) {
